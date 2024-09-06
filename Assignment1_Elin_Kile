@@ -1,0 +1,289 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import random
+import numpy as np
+import scipy.stats as stats
+
+# specify directory where file is found
+WDIR ="/Users/elkil7541/Library/CloudStorage/OneDrive-UiTOffice365/Dokumenter/FYS_2021/"
+
+# specify file name
+file = WDIR + "SpotifyFeatures.csv"
+
+# read file to data frame using pd.read_csv(), file is read into a data frame
+df = pd.read_csv(file)
+
+# number of samples and features
+print(df.info)
+
+# Specify which genres you want in a list
+list_of_genres = ['Classical', 'Pop']
+
+# Filter the DataFrame to get only rows where the genre is "Classical" or "Pop"
+# selected_genre_df only contains the songs that are in genre Classical or Pop
+# .copy() is used because you will get an error if you don't. Read documentation.
+selected_genre_df = df[df['genre'].isin(list_of_genres)].copy()
+
+# Assign labels within the filtered DataFrame, create lable for the samples. Pop = 1 and Classical = 0
+selected_genre_df['label'] = selected_genre_df['genre'].apply(lambda x: 0 if x == 'Classical' else 1)
+
+# report how many samples belong to each of the two classes
+label_counts = selected_genre_df['label'].value_counts()
+print(label_counts)
+
+
+# from the selected_genre_df dataframe, make 2 numpy arrays. The first array will be the matrix with the songs along the rows and features
+# i.e. loudness and liveness, as columns.
+features_matrix = selected_genre_df[['loudness', 'liveness']].values
+
+# the second is an array of the labels
+label_array = selected_genre_df['label'].values
+
+
+
+# create a training and a test set, 80/20 split. Split the data per class so that you keep the same class distribution in the training
+# and test set
+
+# Function to split the dataset into a training and test set
+def split(df, test_size=0.2):
+    # This function groups the DataFrame df into subsets based on the unique values in the 'label' column. 
+    # Each group corresponds to a unique label value (0 for Classical and 1 for Pop).
+    # group_keys=False is used to prevent the group keys (in this case, the labels) from being added as an index level 
+    # in the resulting dataframe. Try running without it... It does not work. 
+    test_df = df.groupby('label', group_keys=False).apply(lambda x: x.sample(frac=test_size))
+    # create the training dataset by removing the entries that have been selected for the test dataset from the original dataframe
+    training_df = df.drop(test_df.index)
+    # the function returns the training and test data sets.
+    return training_df, test_df
+
+# Create a training and a test set, 80/20 split. Split the data per class so that you keep the same class distribution in the training
+# and test set.
+# Call the split function defined above, to get the two sets. 
+train_df, test_df = split(selected_genre_df, test_size=0.2)
+
+# Plot the samples on the liveness vs. loudness plane, with a different colour for each class.
+plt.figure(figsize=(10, 6))
+plt.scatter(train_df[train_df['label'] == 0]['loudness'], train_df[train_df['label'] == 0]['liveness'], color='blue', label='Classical')
+plt.scatter(train_df[train_df['label'] == 1]['loudness'], train_df[train_df['label'] == 1]['liveness'], color='red', label='Pop')
+plt.title('Training Set: Liveness vs Loudness')
+plt.xlabel('Loudness')
+plt.ylabel('Liveness')
+plt.legend()
+plt.show()
+
+
+# PROBLEM 2
+
+# define sigmoid function
+# source: https://www.geeksforgeeks.org/implement-sigmoid-function-using-numpy/
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+# Define the cost function using Mean Squared Error
+def compute_cost(features_matrix, label_vector, weights):  
+    predictions = sigmoid(np.dot(features_matrix, weights))
+    errors = predictions - label_vector
+    cost = np.mean(errors ** 2)
+    return cost
+
+
+# Implementing stochastic gradient descent
+def gradient_descent(features_matrix, label_vector, weights, learning_rate, iterations):
+    cost_history = []  # Initialize a list to store the cost at each iteration
+
+    for i in range(iterations):  # Loop over the number of iterations
+        predictions = sigmoid(np.dot(features_matrix, weights))  # Compute the predictions using the sigmoid function
+        errors = predictions - label_vector  # Calculate the error between predictions and actual labels
+        gradient = np.dot(features_matrix.T, errors) / len(label_vector)  # Compute the gradient of the cost function, devide by number of samples
+        weights -= learning_rate * gradient  # Update the weights by subtracting learning rate times the gradient
+        cost_history.append(compute_cost(features_matrix, label_vector, weights))  # Append the current cost to the cost history list
+
+    return weights, cost_history  # Return the final weights and the cost history
+
+
+def predict(features, weights):
+    # Calculate the linear combination of inputs and weights
+    z = np.dot(features, weights)
+    
+    # Apply the sigmoid function to the linear combination
+    probabilities = sigmoid(z)
+    
+    # Initialize an empty list to store the predicted classes
+    predictions = []
+    
+    # Convert probabilities to binary class labels
+    for probability in probabilities:
+        if probability >= 0.5:
+            # If the probability is greater than or equal to 0.5, predict class 1
+            predictions.append(1)
+        else:
+            # If the probability is less than 0.5, predict class 0
+            predictions.append(0)
+    
+    # Step 5: Return the list of predicted class labels
+    return predictions
+
+
+# Normalize features
+# Extract the 'loudness' and 'liveness' columns from train_df and convert them to a numpy array
+train_features = train_df[['loudness', 'liveness']].values
+
+# Extract the 'loudness' and 'liveness' columns from test_df and convert them to a numpy array
+test_features = test_df[['loudness', 'liveness']].values
+
+# Calculate the mean of each feature in the training dataset
+mean = np.mean(train_features, axis=0)
+
+# Calculate the standard deviation of each feature in the training dataset
+std = np.std(train_features, axis=0)
+
+# Standardize the training features by subtracting the mean and dividing by the standard deviation
+train_features = (train_features - mean) / std
+
+# Standardize the testing features using the mean and standard deviation calculated from the training features
+test_features = (test_features - mean) / std
+
+# Add intercept term
+# Add a column of ones to train_features to include the intercept term in the model
+train_features = np.hstack([np.ones((train_features.shape[0], 1)), train_features])
+
+# Add a column of ones to test_features to include the intercept term in the model
+test_features = np.hstack([np.ones((test_features.shape[0], 1)), test_features])
+
+# Extract the 'label' column from the train_df DataFrame and convert it to a numpy array
+train_labels = train_df['label'].values
+
+# Extract the 'label' column from the test_df DataFrame and convert it to a numpy array
+test_labels = test_df['label'].values
+
+# Initialize weights
+# all set to zero, and as many as the number of columns in the train_features matrix
+weights = np.zeros(train_features.shape[1])
+
+
+
+
+
+# test different learning rates
+# learning_rates = [23, 10, 1, 0.1, 0.01, 0.001, 0.0001]
+# for alpha in learning_rates:
+#     weights, cost_history = gradient_descent(train_features, train_labels, np.zeros(train_features.shape[1]), alpha, 1000)
+#     plt.plot(cost_history, label=f'lr={alpha}')
+#     # Predict and evaluate the model (assuming predict function is defined)
+#     predictions = predict(test_features, weights)
+#     accuracy = np.mean(predictions == test_labels)
+#     print(f'Accuracy {alpha}: {accuracy * 100:.2f}%')
+
+# plt.title('Effect of Learning Rate on Convergence')
+# plt.xlabel('Epochs')
+# plt.ylabel('Cost')
+# plt.legend()
+# plt.show()
+
+
+
+def calculate_accuracy(predictions, labels):
+    correct_predictions = np.sum(predictions == labels)
+    accuracy = correct_predictions / len(labels)
+    return accuracy * 100
+
+result_accuracy = [[],[]]
+for i in range(10):
+    # Train the model
+    alpha = 0.1  # Learning rate
+    iterations = 1000  # Number of iterations for gradient descent
+    weights, cost_history = gradient_descent(train_features, train_labels, weights, alpha, iterations)
+
+    # Predict on training set
+    train_predictions = predict(train_features, weights)
+    train_accuracy = calculate_accuracy(train_predictions, train_labels)
+    result_accuracy[0].append(train_accuracy)
+    print(f'Training Accuracy: {train_accuracy:.2f}%')
+
+    # Predict on test set
+    test_predictions = predict(test_features, weights)
+    test_accuracy = calculate_accuracy(test_predictions, test_labels)
+    result_accuracy[1].append(test_accuracy)
+    print(f'Test Accuracy: {test_accuracy:.2f}%')
+
+
+# Calculate mean and standard deviation for training and test accuracies
+train_mean = np.mean(result_accuracy[0])
+train_std = np.std(result_accuracy[0])
+test_mean = np.mean(result_accuracy[1])
+test_std = np.std(result_accuracy[1])
+
+print(f'\nTraining Accuracy Mean: {train_mean:.2f}%')
+print(f'Training Accuracy Standard Deviation: {train_std:.2f}%')
+print(f'Test Accuracy Mean: {test_mean:.2f}%')
+print(f'Test Accuracy Standard Deviation: {test_std:.2f}%')
+
+# Plotting the cost history
+plt.figure(figsize=(10, 6))
+plt.plot(range(iterations), cost_history, label='Training Error')
+plt.title('Training Error vs. Epochs')
+plt.xlabel('Epochs')
+plt.ylabel('Training Error')
+plt.legend()
+plt.show()
+
+# check if there is a significant difference between the two accuracies
+
+# Perform the t-test
+t_stat, p_value = stats.ttest_ind(result_accuracy[0], result_accuracy[1])
+
+print(f"T-statistic: {t_stat}")
+print(f"P-value: {p_value}")
+
+# Interpretation
+significance_level = 0.05  
+if p_value < significance_level:
+    print("Reject the null hypothesis - there is a significant difference between the two lists.")
+else:
+    print("Fail to reject the null hypothesis - there is no significant difference between the two lists.")
+
+# PROBLEM 3
+
+# After predicting on the test set
+test_predictions = predict(test_features, weights)
+
+# Initialize the confusion matrix components
+TP = 0
+TN = 0
+FP = 0
+FN = 0
+
+# Calculate TP, TN, FP, FN
+for i in range(len(test_labels)):
+    if test_labels[i] == 1 and test_predictions[i] == 1:
+        TP += 1
+    elif test_labels[i] == 0 and test_predictions[i] == 0:
+        TN += 1
+    elif test_labels[i] == 0 and test_predictions[i] == 1:
+        FP += 1
+    elif test_labels[i] == 1 and test_predictions[i] == 0:
+        FN += 1
+
+# Construct the confusion matrix
+confusion_matrix = np.array([[TN, FP],
+                        [FN, TP]])
+
+# Print the confusion matrix
+print("Confusion Matrix:")
+print(confusion_matrix)
+
+# as loudness appears to be a relatively good measure of if the song belongs to classical or pop, I sort on 
+
+# Filter the DataFrame to get only rows where the genre is "Classical"
+classical_songs_df = selected_genre_df[df['genre'] == 'Classical'].copy()
+
+# Sort the classical songs by loudness in descending order
+sorted_classical_songs_df = classical_songs_df.sort_values(by='loudness', ascending=False)
+
+# select the top N classical songs with the highest loudness
+top_n = 5 
+top_classical_songs = sorted_classical_songs_df.head(top_n)
+
+# Print the top N classical songs with their loudness values
+print("Top {} classical songs with the highest loudness:".format(top_n))
+print(top_classical_songs[['artist_name', 'track_name', 'loudness']])
